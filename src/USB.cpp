@@ -149,31 +149,29 @@ void USB_::findDriver(const std::string& devName)
 			{
 				this->registryLock.unlock();
 			}
-
-			if (descriptorHeader->bDescriptorType == USB_DT_INTERFACE)
+		}
+		if (descriptorHeader->bDescriptorType == USB_DT_INTERFACE)
+		{
+			usb_interface_descriptor* intDescriptor{reinterpret_cast<usb_interface_descriptor*>(descriptorHeader)};
+			const InterfaceKey key{
+				intDescriptor->bInterfaceClass,
+				intDescriptor->bInterfaceSubClass,
+				intDescriptor->bInterfaceProtocol};
+			CLOGD("Searching driver for interface class " +
+					Ttos(key.get<0>()) +
+					"/" + Ttos(key.get<1>()) +
+					"/" + Ttos(key.get<2>()));
+			this->registryLock.lock();
+			if (this->interfaceClassRegistry.find(key) != this->interfaceClassRegistry.end())
 			{
-				usb_interface_descriptor* intDescriptor{reinterpret_cast<usb_interface_descriptor*>(descriptorHeader)};
-				const InterfaceKey key{
-					intDescriptor->bInterfaceClass,
-					intDescriptor->bInterfaceSubClass,
-					intDescriptor->bInterfaceProtocol};
-				CLOGD("Searching driver for interface class " +
-						Ttos(key.get<0>()) +
-						"/" + Ttos(key.get<1>()) +
-						"/" + Ttos(key.get<2>()));
-				this->registryLock.lock();
-				if (this->interfaceClassRegistry.find(key) != this->interfaceClassRegistry.end())
-				{
-					const Driver::Factory& factory = this->interfaceClassRegistry.at(key);
-					this->registryLock.unlock();
-					this->tryDriver(devName, factory);
-				}
-				else
-				{
-					this->registryLock.unlock();
-				}
+				const Driver::Factory& factory = this->interfaceClassRegistry.at(key);
+				this->registryLock.unlock();
+				this->tryDriver(devName, factory);
 			}
-			descriptorHeader = usb_descriptor_iter_next(descriptorIter);
+			else
+			{
+				this->registryLock.unlock();
+			}
 		}
 		descriptorHeader = usb_descriptor_iter_next(descriptorIter);
 	}
