@@ -83,16 +83,16 @@ namespace freeril
 
 		static USB& initInstance();
 		static Registered registerProduct(
-				const Driver::Factory* factory,
+				Driver::Factory* factory,
 				const VendorID vendor,
 				const ProductID product);
 		static Registered registerDeviceClass(
-				const Driver::Factory* factory,
+				Driver::Factory* factory,
 				const DeviceClass deviceClass,
 				const DeviceSubclass deviceSubclass,
 				const DeviceProtocol deviceProtocol);
 		static Registered registerInterfaceClass(
-				const Driver::Factory* factory,
+				Driver::Factory* factory,
 				const InterfaceClass interfaceClass,
 				const InterfaceSubclass interfaceSubclass,
 				const InterfaceProtocol interfaceProtocol);

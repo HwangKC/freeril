@@ -15,9 +15,11 @@
 #include <boost/thread.hpp>
 #include <boost/bind.hpp>
 #include <boost/scoped_ptr.hpp>
+#include <boost/ptr_container/ptr_map.hpp>
 #include <boost/tuple/tuple.hpp>
 #include <boost/tuple/tuple_comparison.hpp>
 
+#include <memory>
 #include <map>
 #include <string>
 
@@ -31,9 +33,9 @@ class USB_ : public USB, public Loggable
 	typedef boost::tuple<VendorID, ProductID> ProductKey;
 	typedef boost::tuple<DeviceClass, DeviceSubclass, DeviceProtocol> DeviceKey;
 	typedef boost::tuple<InterfaceClass, InterfaceSubclass, InterfaceProtocol> InterfaceKey;
-	typedef std::map<ProductKey, const Driver::Factory*> ProductRegistry;
-	typedef std::map<DeviceKey, const Driver::Factory*> DeviceClassRegistry;
-	typedef std::map<InterfaceKey, const Driver::Factory* > InterfaceClassRegistry;
+	typedef boost::ptr_map<ProductKey, Driver::Factory> ProductRegistry;
+	typedef boost::ptr_map<DeviceKey, Driver::Factory> DeviceClassRegistry;
+	typedef boost::ptr_map<InterfaceKey, Driver::Factory> InterfaceClassRegistry;
 public:
 	USB_();
 	virtual ~USB_();
@@ -43,10 +45,8 @@ public:
 	void run();
 
 private:
-	void findProductDriver(const std::string& devName);
-	void findDeviceClassDriver(const std::string& devName);
-	void findInterfaceClassDriver(const std::string& devName);
-	void tryDriver(const std::string& devName, const Driver::Factory* factory);
+	void findDriver(const std::string& devName);
+	void tryDriver(const std::string& devName, const Driver::Factory& factory);
 
 	static int deviceAdded(const char* devName, void* _that);
 	static int deviceRemoved(const char* devName, void* _that);
@@ -100,12 +100,12 @@ void USB_::run()
 			this);
 }
 
-void USB_::findProductDriver(const std::string& devName)
+void USB_::findDriver(const std::string& devName)
 {
 	usb_device* dev{usb_device_open(devName.c_str())};
 	const VendorID vendorID{usb_device_get_vendor_id(dev)};
 	const ProductID productID{usb_device_get_product_id(dev)};
-	usb_device_close(dev);
+
 	CLOGD("Searching driver for VID " +
 			Ttos(vendorID, std::hex) + " PID " +
 			Ttos(productID, std::hex));
@@ -113,7 +113,7 @@ void USB_::findProductDriver(const std::string& devName)
 	this->registryLock.lock();
 	if (this->productRegistry.find(key) != this->productRegistry.end())
 	{
-		const Driver::Factory* factory{this->productRegistry[key]};
+		const Driver::Factory& factory = this->productRegistry.at(key);
 		this->registryLock.unlock();
 		this->tryDriver(devName, factory);
 	}
@@ -121,11 +121,7 @@ void USB_::findProductDriver(const std::string& devName)
 	{
 		this->registryLock.unlock();
 	}
-}
 
-void USB_::findDeviceClassDriver(const std::string& devName)
-{
-	usb_device* dev{usb_device_open(devName.c_str())};
 	usb_descriptor_iter* descriptorIter = new usb_descriptor_iter();
 	usb_descriptor_iter_init(dev, descriptorIter);
 	usb_descriptor_header* descriptorHeader{usb_descriptor_iter_next(descriptorIter)};
@@ -145,7 +141,7 @@ void USB_::findDeviceClassDriver(const std::string& devName)
 			this->registryLock.lock();
 			if (this->deviceClassRegistry.find(key) != this->deviceClassRegistry.end())
 			{
-				const Driver::Factory* factory{this->deviceClassRegistry[key]};
+				const Driver::Factory& factory = this->deviceClassRegistry.at(key);
 				this->registryLock.unlock();
 				this->tryDriver(devName, factory);
 			}
@@ -153,6 +149,31 @@ void USB_::findDeviceClassDriver(const std::string& devName)
 			{
 				this->registryLock.unlock();
 			}
+
+			if (descriptorHeader->bDescriptorType == USB_DT_INTERFACE)
+			{
+				usb_interface_descriptor* intDescriptor{reinterpret_cast<usb_interface_descriptor*>(descriptorHeader)};
+				const InterfaceKey key{
+					intDescriptor->bInterfaceClass,
+					intDescriptor->bInterfaceSubClass,
+					intDescriptor->bInterfaceProtocol};
+				CLOGD("Searching driver for interface class " +
+						Ttos(key.get<0>()) +
+						"/" + Ttos(key.get<1>()) +
+						"/" + Ttos(key.get<2>()));
+				this->registryLock.lock();
+				if (this->interfaceClassRegistry.find(key) != this->interfaceClassRegistry.end())
+				{
+					const Driver::Factory& factory = this->interfaceClassRegistry.at(key);
+					this->registryLock.unlock();
+					this->tryDriver(devName, factory);
+				}
+				else
+				{
+					this->registryLock.unlock();
+				}
+			}
+			descriptorHeader = usb_descriptor_iter_next(descriptorIter);
 		}
 		descriptorHeader = usb_descriptor_iter_next(descriptorIter);
 	}
@@ -160,55 +181,16 @@ void USB_::findDeviceClassDriver(const std::string& devName)
 	usb_device_close(dev);
 }
 
-void USB_::findInterfaceClassDriver(const std::string& devName)
+void USB_::tryDriver(const std::string& devName, const Driver::Factory& factory)
 {
-	usb_device* dev{usb_device_open(devName.c_str())};
-	usb_descriptor_iter* descriptorIter = new usb_descriptor_iter();
-	usb_descriptor_iter_init(dev, descriptorIter);
-	usb_descriptor_header* descriptorHeader{usb_descriptor_iter_next(descriptorIter)};
-	while (descriptorHeader != 0)
-	{
-		if (descriptorHeader->bDescriptorType == USB_DT_INTERFACE)
-		{
-			usb_interface_descriptor* intDescriptor{reinterpret_cast<usb_interface_descriptor*>(descriptorHeader)};
-			const InterfaceKey key{
-				intDescriptor->bInterfaceClass,
-				intDescriptor->bInterfaceSubClass,
-				intDescriptor->bInterfaceProtocol};
-			CLOGD("Searching driver for interface class " +
-					Ttos(key.get<0>()) +
-					"/" + Ttos(key.get<1>()) +
-					"/" + Ttos(key.get<2>()));
-			this->registryLock.lock();
-			if (this->interfaceClassRegistry.find(key) != this->interfaceClassRegistry.end())
-			{
-				const Driver::Factory* factory{this->interfaceClassRegistry[key]};
-				this->registryLock.unlock();
-				this->tryDriver(devName, factory);
-			}
-			else
-			{
-				this->registryLock.unlock();
-			}
-		}
-		descriptorHeader = usb_descriptor_iter_next(descriptorIter);
-	}
-	delete descriptorIter;
-	usb_device_close(dev);
-}
-
-void USB_::tryDriver(const std::string& devName, const Driver::Factory* factory)
-{
-	CLOGD("Trying driver " + factory->name() + " for " + devName);
+	CLOGD("Trying driver " + factory.name() + " for " + devName);
 }
 
 int USB_::deviceAdded(const char* devName, void* _that)
 {
 	USB_* that{reinterpret_cast<USB_*>(_that)};
 	LOGI(that, "USB device added: " + std::string(devName));
-	that->findProductDriver(devName);
-	that->findDeviceClassDriver(devName);
-	that->findInterfaceClassDriver(devName);
+	that->findDriver(devName);
 	return false;
 }
 
@@ -249,12 +231,13 @@ USB& USB::initInstance()
 }
 
 USB::Registered USB::registerProduct(
-		const USB::Driver::Factory* factory,
+		USB::Driver::Factory* factory,
 		const USB::VendorID vendor,
 		const USB::ProductID product)
 {
+	USB_::ProductKey key{vendor, product};
 	USB_::registryLock.lock();
-	USB_::productRegistry[USB_::ProductKey(vendor, product)] = factory;
+	USB_::productRegistry.insert(key, factory);
 	USB_::registryLock.unlock();
 	LOGI("USB", "registered driver " + factory->name() +
 			" for VID " + Ttos(vendor, std::hex) +
@@ -263,14 +246,14 @@ USB::Registered USB::registerProduct(
 }
 
 USB::Registered USB::registerDeviceClass(
-		const USB::Driver::Factory* factory,
+		USB::Driver::Factory* factory,
 		const USB::DeviceClass deviceClass,
 		const USB::DeviceSubclass deviceSubclass,
 		const USB::DeviceProtocol deviceProtocol)
 {
-	const USB_::DeviceKey key{deviceClass, deviceSubclass, deviceProtocol};
+	USB_::DeviceKey key{deviceClass, deviceSubclass, deviceProtocol};
 	USB_::registryLock.lock();
-	USB_::deviceClassRegistry[key] = factory;
+	USB_::deviceClassRegistry.insert(key, factory);
 	USB_::registryLock.unlock();
 	LOGI("USB", "registered driver " + factory->name() +
 			" for device class " + Ttos(deviceClass) +
@@ -280,14 +263,14 @@ USB::Registered USB::registerDeviceClass(
 }
 
 USB::Registered USB::registerInterfaceClass(
-		const USB::Driver::Factory* factory,
+		USB::Driver::Factory* factory,
 		const USB::InterfaceClass interfaceClass,
 		const USB::InterfaceSubclass interfaceSubclass,
 		const USB::InterfaceProtocol interfaceProtocol)
 {
-	const USB_::InterfaceKey key{interfaceClass, interfaceSubclass, interfaceProtocol};
+	USB_::InterfaceKey key{interfaceClass, interfaceSubclass, interfaceProtocol};
 	USB_::registryLock.lock();
-	USB_::interfaceClassRegistry[key] = factory;
+	USB_::interfaceClassRegistry.insert(key, factory);
 	USB_::registryLock.unlock();
 	LOGI("USB", "registered driver " + factory->name() +
 			" for interface class " + Ttos(interfaceClass) +
