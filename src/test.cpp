@@ -1,20 +1,23 @@
 /*
- * testusb.cpp
+ * test.cpp
  *
- *  Created on: 03.03.2012
- *      Author: Swen Kuehnlein
+ *  Created on: 08.03.2012
+ *      Author: Swen Kühnlein
  */
 
-
 #include "USB.h"
+
 #include <iostream>
 
 int main()
 {
 	using namespace freeril;
-	USB usb = USB::instance();
+
+	USB& usb __attribute__((unused)) = USB::initInstance();
 
 	char foo[255];
 	std::cin.getline(foo, 255);
 	return 0;
 }
+
+

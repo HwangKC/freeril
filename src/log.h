@@ -43,7 +43,7 @@ namespace freeril
 			WARN,
 			ERROR
 		};
-	};
+	}
 
 	void logmsg(const Loggable* from, const log::Priority priority, const std::string& msg);
 	void logmsg(const std::string& from, const log::Priority priority, const std::string& msg);

@@ -44,11 +44,11 @@ Loggable::~Loggable()
 std::string Loggable::logName() const
 {
 #ifdef __GNUG__
-	int status = -4;
-	const char *const name = typeid(*this).name();
-	char* res = abi::__cxa_demangle(name, NULL, NULL, &status);
-	const char *const demangled_name = (status == 0) ? res : name;
-	std::string retval(demangled_name);
+	int status{-4};
+	const char *const name{typeid(*this).name()};
+	char* res{abi::__cxa_demangle(name, NULL, NULL, &status)};
+	const char *const demangled_name{(status == 0) ? res : name};
+	std::string retval{demangled_name};
 	free(res);
 	return retval;
 #else

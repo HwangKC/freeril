@@ -1,177 +1,223 @@
 /*
- * USB.cpp
+ * USBWatcher.cpp
  *
- *  Created on: 01.03.2012
- *      Author: Swen Kuehnlein
+ *  Created on: 08.03.2012
+ *      Author: Swen Kühnlein
  */
 
 #include "USB.h"
-#include "USBDevice.h"
 #include "log.h"
+#include "Ttos.h"
 
-#include "usbhost/usbhost.h"
+#include <usbhost/usbhost.h>
 
-#include <boost/bind.hpp>
-#include <boost/thread.hpp>
 #include <boost/thread/mutex.hpp>
+#include <boost/thread.hpp>
+#include <boost/bind.hpp>
+#include <boost/scoped_ptr.hpp>
 
-#include <vector>
+#include <map>
+#include <string>
 
-namespace freeril
+using namespace freeril;
+
+class USB_ : public USB, public Loggable
 {
+	friend class USB;
 
-class USB_Impl : public USB, public Loggable
-{
+	typedef USB Super;
+	typedef std::pair<VendorID, ProductID> ProductKey;
+	typedef std::pair<DeviceClass, DeviceSubclass> DeviceKey;
+	typedef std::pair<InterfaceClass, InterfaceSubclass> InterfaceKey;
+	typedef std::map<ProductKey, const Driver::Factory*> ProductRegistry;
+	typedef std::map<DeviceKey, const Driver::Factory*> DeviceClassRegistry;
+	typedef std::map<InterfaceKey, const Driver::Factory* > InterfaceClassRegistry;
 public:
+	USB_();
+	virtual ~USB_();
 
-	class Destroyer
-	{
-	public:
-		Destroyer() : target(0) {}
-		~Destroyer() { if (this->target != 0) delete this->target; }
+	virtual std::string logName() const;
 
-		void setTarget(USB_Impl* target) { this->target = target; }
+	void run();
 
-		USB_Impl* target;
-	};
+private:
+	void findProductDriver(const std::string& devName);
+	void findDeviceClassDriver(const std::string& devName);
+	void findInterfaceClassDriver(const std::string& devName);
+	void tryDriver(const std::string& devName, const Driver::Factory* factory);
 
-	class Watcher : public Loggable
-	{
-	public:
+	static int deviceAdded(const char* devName, void* _that);
+	static int deviceRemoved(const char* devName, void* _that);
+	static int discoveryDone(void* _that);
 
-		typedef std::vector<USBDevice> Devices;
+	static boost::mutex initLock;
+	static boost::scoped_ptr<USB_> instance;
 
-		Watcher();
-		virtual ~Watcher();
-		void run();
-		inline void requestFinish();
+	static boost::mutex registryLock;
+	static ProductRegistry productRegistry;
+	static DeviceClassRegistry deviceClassRegistry;
+	static InterfaceClassRegistry interfaceClassRegistry;
 
-// TODO: Identify devices by path (thread safe)
-		inline unsigned int getDeviceCount() const;
-		inline USBDevice& getDevice(unsigned int no);
+	usb_host_context* usbContext;
 
-	private:
-		static int deviceAdded(const char* dev_name, void* _that);
-		static int deviceRemoved(const char* dev_name, void* _that);
-		static int discoveryDone(void* _that);
-
-		usb_host_context* uhc;
-		boost::mutex finishMutex;
-		bool finish;
-		boost::mutex devicesMutex;
-		Devices devices;
-	};
-
-
-	USB_Impl();
-	~USB_Impl();
-
-	static USB_Impl* _instance;
-	static Destroyer _destroyer;
-
-	Watcher watcher;
-	boost::thread watcherThread;
-	usb_host_context* uhc;
+	boost::thread thread;
 };
 
-USB_Impl* USB_Impl::_instance = 0;
-USB_Impl::Destroyer USB_Impl::_destroyer = USB_Impl::Destroyer();
+boost::mutex USB_::initLock{};
+boost::scoped_ptr<USB_> USB_::instance{};
 
-USB_Impl::Watcher::Watcher() :
-		uhc(usb_host_init()),
-		finish(false)
+boost::mutex USB_::registryLock{};
+USB_::ProductRegistry USB_::productRegistry{};
+USB_::DeviceClassRegistry USB_::deviceClassRegistry{};
+USB_::InterfaceClassRegistry USB_::interfaceClassRegistry{};
+
+USB_::USB_() :
+		Super{},
+		Loggable{},
+		usbContext{usb_host_init()},
+		thread{boost::bind(&USB_::run, this)}
 {
 }
 
-USB_Impl::Watcher::~Watcher()
+USB_::~USB_()
 {
-	usb_host_cleanup(this->uhc);
+	usb_host_cleanup(this->usbContext);
 }
 
-void USB_Impl::Watcher::run()
+std::string USB_::logName() const
 {
-	usb_host_run(this->uhc,
-				 this->deviceAdded,
-				 this->deviceRemoved,
-				 this->discoveryDone,
-				 this);
-	std::cout << "Finished" << std::endl;
+	return "USB";
 }
 
-void USB_Impl::Watcher::requestFinish()
+void USB_::run()
 {
-	this->finishMutex.lock();
-	this->finish = true;
-	this->finishMutex.unlock();
+	usb_host_run(this->usbContext,
+			this->deviceAdded,
+			this->deviceRemoved,
+			this->discoveryDone,
+			this);
 }
 
-unsigned int USB_Impl::Watcher::getDeviceCount() const
+void USB_::findProductDriver(const std::string& devName)
 {
-	return this->devices.size();
+	usb_device* dev{usb_device_open(devName.c_str())};
+	const VendorID vendorID{usb_device_get_vendor_id(dev)};
+	const ProductID productID{usb_device_get_product_id(dev)};
+	usb_device_close(dev);
+	CLOGD("Searching driver for VID " +
+			Ttos(vendorID, std::hex) + " PID " +
+			Ttos(productID, std::hex));
+	const ProductKey key{vendorID, productID};
+	this->registryLock.lock();
+	if (this->productRegistry.find(key) != this->productRegistry.end())
+	{
+		const Driver::Factory* factory{this->productRegistry[key]};
+		this->registryLock.unlock();
+		this->tryDriver(devName, factory);
+	}
+	else
+	{
+		this->registryLock.unlock();
+	}
 }
 
-USBDevice& USB_Impl::Watcher::getDevice(unsigned int no)
+void USB_::findDeviceClassDriver(const std::string& devName)
 {
-	return this->devices[no];
+	usb_device* dev{usb_device_open(devName.c_str())};
+	usb_descriptor_iter* descriptorIter = new usb_descriptor_iter();
+	usb_descriptor_iter_init(dev, descriptorIter);
+	usb_descriptor_header* descriptorHeader{usb_descriptor_iter_next(descriptorIter)};
+	while (descriptorHeader != 0)
+	{
+		if (descriptorHeader->bDescriptorType == USB_DT_DEVICE)
+		{
+			usb_device_descriptor* devDescriptor{reinterpret_cast<usb_device_descriptor*>(descriptorHeader)};
+			const ProductKey key{devDescriptor->bDeviceClass,
+				devDescriptor->bDeviceSubClass};
+			this->registryLock.lock();
+			if (this->deviceClassRegistry.find(key) != this->deviceClassRegistry.end())
+			{
+				const Driver::Factory* factory{this->deviceClassRegistry[key]};
+				this->registryLock.unlock();
+				this->tryDriver(devName, factory);
+			}
+			else
+			{
+				this->registryLock.unlock();
+			}
+		}
+		descriptorHeader = usb_descriptor_iter_next(descriptorIter);
+	}
+	delete descriptorIter;
+	usb_device_close(dev);
 }
 
-int USB_Impl::Watcher::deviceAdded(const char* dev_name, void* _that)
+void USB_::findInterfaceClassDriver(const std::string& devName)
 {
-	Watcher* that = reinterpret_cast<Watcher*>(_that);
-	LOGI(that, "USB device added: " + std::string(dev_name));
-
-	that->devicesMutex.lock();
-	//that->devices.push_back(USBDevice(dev_name));
-	that->devicesMutex.unlock();
-
-	that->finishMutex.lock();
-	bool res = that->finish;
-	that->finishMutex.unlock();
-	return res;
+	usb_device* dev{usb_device_open(devName.c_str())};
+	usb_descriptor_iter* descriptorIter = new usb_descriptor_iter();
+	usb_descriptor_iter_init(dev, descriptorIter);
+	usb_descriptor_header* descriptorHeader{usb_descriptor_iter_next(descriptorIter)};
+	while (descriptorHeader != 0)
+	{
+		if (descriptorHeader->bDescriptorType == USB_DT_INTERFACE)
+		{
+			usb_interface_descriptor* intDescriptor{reinterpret_cast<usb_interface_descriptor*>(descriptorHeader)};
+			const ProductKey key{intDescriptor->bInterfaceClass,
+				intDescriptor->bInterfaceSubClass};
+			this->registryLock.lock();
+			if (this->interfaceClassRegistry.find(key) != this->interfaceClassRegistry.end())
+			{
+				const Driver::Factory* factory{this->interfaceClassRegistry[key]};
+				this->registryLock.unlock();
+				this->tryDriver(devName, factory);
+			}
+			else
+			{
+				this->registryLock.unlock();
+			}
+		}
+		descriptorHeader = usb_descriptor_iter_next(descriptorIter);
+	}
+	delete descriptorIter;
+	usb_device_close(dev);
 }
 
-int USB_Impl::Watcher::deviceRemoved(const char* dev_name, void* _that)
+void USB_::tryDriver(const std::string& devName, const Driver::Factory* factory)
 {
-	Watcher* that = reinterpret_cast<Watcher*>(_that);
-	LOGI(that, "USB device removed: " + std::string(dev_name));
-
-	that->devicesMutex.lock();
-	//const Devices::iterator pos = std::find(that->devices.begin(), that->devices.end(), dev_name);
-	//that->devices.erase(pos);
-	that->devicesMutex.unlock();
-
-	that->finishMutex.lock();
-	bool res = that->finish;
-	that->finishMutex.unlock();
-	return res;
+	CLOGD("Trying driver " + factory->name() + " for " + devName);
 }
 
-int USB_Impl::Watcher::discoveryDone(void* _that)
+int USB_::deviceAdded(const char* devName, void* _that)
 {
-	Watcher* that = reinterpret_cast<Watcher*>(_that);
-	LOGD(that, "USB discovery done");
-
-	that->finishMutex.lock();
-	bool res = that->finish;
-	that->finishMutex.unlock();
-	return res;
+	USB_* that{reinterpret_cast<USB_*>(_that)};
+	LOGI(that, "USB device added: " + std::string(devName));
+	that->findProductDriver(devName);
+	that->findDeviceClassDriver(devName);
+	that->findInterfaceClassDriver(devName);
+	return false;
 }
 
-USB_Impl::USB_Impl() :
-		watcher(),
-		watcherThread(boost::bind(&Watcher::run, &watcher)),
-		uhc(usb_host_init())
+int USB_::deviceRemoved(const char* devName, void* _that)
 {
-
+	USB_* that{reinterpret_cast<USB_*>(_that)};
+	LOGI(that, "USB device removed: " + std::string(devName));
+	return false;
 }
 
-USB_Impl::~USB_Impl()
+int USB_::discoveryDone(void* _that)
 {
-	this->watcher.requestFinish();
-	usb_host_cleanup(this->uhc);
+	USB_* that{reinterpret_cast<USB_*>(_that)};
+	LOGI(that, "USB discovery done");
+	return false;
 }
+
 
 USB::USB()
+{
+}
+
+USB::USB(const USB&)
 {
 }
 
@@ -179,15 +225,53 @@ USB::~USB()
 {
 }
 
-USB& USB::instance()
+USB& USB::initInstance()
 {
-	// TODO: Make thread-safe!
-	if (USB_Impl::_instance == 0)
-	{
-		USB_Impl::_instance = new USB_Impl();
-		USB_Impl::_destroyer.setTarget(USB_Impl::_instance);
-	}
-	return *USB_Impl::_instance;
+	USB_::initLock.lock();
+	if (USB_::instance == 0)
+		USB_::instance.reset(new USB_());
+	USB_::initLock.unlock();
+	return *USB_::instance;
 }
 
+USB::Registered USB::registerProduct(
+		const USB::Driver::Factory* factory,
+		const USB::VendorID vendor,
+		const USB::ProductID product)
+{
+	USB_::registryLock.lock();
+	USB_::productRegistry[USB_::ProductKey(vendor, product)] = factory;
+	USB_::registryLock.unlock();
+	LOGI("USB", "registered driver " + factory->name() +
+			" for VID " + Ttos(vendor, std::hex) +
+			" PID " + Ttos(product, std::hex));
+	return USB::Registered{};
+}
+
+USB::Registered USB::registerDeviceClass(
+		const USB::Driver::Factory* factory,
+		const USB::DeviceClass deviceClass,
+		const USB::DeviceSubclass deviceSubclass)
+{
+	USB_::registryLock.lock();
+	USB_::deviceClassRegistry[USB_::DeviceKey(deviceClass, deviceSubclass)] = factory;
+	USB_::registryLock.unlock();
+	LOGI("USB", "registered driver " + factory->name() +
+			" for device class " + Ttos(deviceClass) +
+			"/" + Ttos(deviceSubclass));
+	return USB::Registered{};
+}
+
+USB::Registered USB::registerInterfaceClass(
+		const USB::Driver::Factory* factory,
+		const USB::InterfaceClass interfaceClass,
+		const USB::InterfaceSubclass interfaceSubclass)
+{
+	USB_::registryLock.lock();
+	USB_::interfaceClassRegistry[USB_::InterfaceKey(interfaceClass, interfaceSubclass)] = factory;
+	USB_::registryLock.unlock();
+	LOGI("USB", "registered driver " + factory->name() +
+			" for interface class " + Ttos(interfaceClass) +
+			"/" + Ttos(interfaceSubclass));
+	return USB::Registered{};
 }
