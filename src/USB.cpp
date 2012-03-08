@@ -15,6 +15,8 @@
 #include <boost/thread.hpp>
 #include <boost/bind.hpp>
 #include <boost/scoped_ptr.hpp>
+#include <boost/tuple/tuple.hpp>
+#include <boost/tuple/tuple_comparison.hpp>
 
 #include <map>
 #include <string>
@@ -26,9 +28,9 @@ class USB_ : public USB, public Loggable
 	friend class USB;
 
 	typedef USB Super;
-	typedef std::pair<VendorID, ProductID> ProductKey;
-	typedef std::pair<DeviceClass, DeviceSubclass> DeviceKey;
-	typedef std::pair<InterfaceClass, InterfaceSubclass> InterfaceKey;
+	typedef boost::tuple<VendorID, ProductID> ProductKey;
+	typedef boost::tuple<DeviceClass, DeviceSubclass, DeviceProtocol> DeviceKey;
+	typedef boost::tuple<InterfaceClass, InterfaceSubclass, InterfaceProtocol> InterfaceKey;
 	typedef std::map<ProductKey, const Driver::Factory*> ProductRegistry;
 	typedef std::map<DeviceKey, const Driver::Factory*> DeviceClassRegistry;
 	typedef std::map<InterfaceKey, const Driver::Factory* > InterfaceClassRegistry;
@@ -132,8 +134,14 @@ void USB_::findDeviceClassDriver(const std::string& devName)
 		if (descriptorHeader->bDescriptorType == USB_DT_DEVICE)
 		{
 			usb_device_descriptor* devDescriptor{reinterpret_cast<usb_device_descriptor*>(descriptorHeader)};
-			const ProductKey key{devDescriptor->bDeviceClass,
-				devDescriptor->bDeviceSubClass};
+			const DeviceKey key{
+				devDescriptor->bDeviceClass,
+				devDescriptor->bDeviceSubClass,
+				devDescriptor->bDeviceProtocol};
+			CLOGD("Searching driver for device class " +
+					Ttos(key.get<0>()) +
+					"/" + Ttos(key.get<1>()) +
+					"/" + Ttos(key.get<2>()));
 			this->registryLock.lock();
 			if (this->deviceClassRegistry.find(key) != this->deviceClassRegistry.end())
 			{
@@ -163,8 +171,14 @@ void USB_::findInterfaceClassDriver(const std::string& devName)
 		if (descriptorHeader->bDescriptorType == USB_DT_INTERFACE)
 		{
 			usb_interface_descriptor* intDescriptor{reinterpret_cast<usb_interface_descriptor*>(descriptorHeader)};
-			const ProductKey key{intDescriptor->bInterfaceClass,
-				intDescriptor->bInterfaceSubClass};
+			const InterfaceKey key{
+				intDescriptor->bInterfaceClass,
+				intDescriptor->bInterfaceSubClass,
+				intDescriptor->bInterfaceProtocol};
+			CLOGD("Searching driver for interface class " +
+					Ttos(key.get<0>()) +
+					"/" + Ttos(key.get<1>()) +
+					"/" + Ttos(key.get<2>()));
 			this->registryLock.lock();
 			if (this->interfaceClassRegistry.find(key) != this->interfaceClassRegistry.end())
 			{
@@ -251,27 +265,33 @@ USB::Registered USB::registerProduct(
 USB::Registered USB::registerDeviceClass(
 		const USB::Driver::Factory* factory,
 		const USB::DeviceClass deviceClass,
-		const USB::DeviceSubclass deviceSubclass)
+		const USB::DeviceSubclass deviceSubclass,
+		const USB::DeviceProtocol deviceProtocol)
 {
+	const USB_::DeviceKey key{deviceClass, deviceSubclass, deviceProtocol};
 	USB_::registryLock.lock();
-	USB_::deviceClassRegistry[USB_::DeviceKey(deviceClass, deviceSubclass)] = factory;
+	USB_::deviceClassRegistry[key] = factory;
 	USB_::registryLock.unlock();
 	LOGI("USB", "registered driver " + factory->name() +
 			" for device class " + Ttos(deviceClass) +
-			"/" + Ttos(deviceSubclass));
+			"/" + Ttos(deviceSubclass) +
+			"/" + Ttos(deviceProtocol));
 	return USB::Registered{};
 }
 
 USB::Registered USB::registerInterfaceClass(
 		const USB::Driver::Factory* factory,
 		const USB::InterfaceClass interfaceClass,
-		const USB::InterfaceSubclass interfaceSubclass)
+		const USB::InterfaceSubclass interfaceSubclass,
+		const USB::InterfaceProtocol interfaceProtocol)
 {
+	const USB_::InterfaceKey key{interfaceClass, interfaceSubclass, interfaceProtocol};
 	USB_::registryLock.lock();
-	USB_::interfaceClassRegistry[USB_::InterfaceKey(interfaceClass, interfaceSubclass)] = factory;
+	USB_::interfaceClassRegistry[key] = factory;
 	USB_::registryLock.unlock();
 	LOGI("USB", "registered driver " + factory->name() +
 			" for interface class " + Ttos(interfaceClass) +
-			"/" + Ttos(interfaceSubclass));
+			"/" + Ttos(interfaceSubclass) +
+			"/" + Ttos(interfaceProtocol));
 	return USB::Registered{};
 }

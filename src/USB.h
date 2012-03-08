@@ -20,12 +20,12 @@
 #define FREERIL_USB_REGISTER_PRODUCT(driver, vid, pid) \
 	static ::freeril::USB::Registered FREERIL_UNIQUE_NAME(__usb_registered_product)  __attribute__((__unused__)) \
 	 = ::freeril::USB::registerProduct(new driver::Factory(), vid, pid)
-#define FREERIL_USB_REGISTER_DEVICECLASS(driver, devClass, subClass) \
+#define FREERIL_USB_REGISTER_DEVICECLASS(driver, devClass, subClass, protocol) \
 	static ::freeril::USB::Registered FREERIL_UNIQUE_NAME(__usb_registered_deviceClass) __attribute__((__unused__)) \
-	 = ::freeril::USB::registerDeviceClass(new driver::Factory(), devClass, subClass)
-#define FREERIL_USB_REGISTER_INTERFACECLASS(driver, intClass, subClass) \
+	 = ::freeril::USB::registerDeviceClass(new driver::Factory(), devClass, subClass, protocol)
+#define FREERIL_USB_REGISTER_INTERFACECLASS(driver, intClass, subClass, protocol) \
 	static ::freeril::USB::Registered FREERIL_UNIQUE_NAME(__usb_registered_interfaceClass) __attribute__((__unused__)) \
-	 = ::freeril::USB::registerInterfaceClass(new driver::Factory(), intClass, subClass)
+	 = ::freeril::USB::registerInterfaceClass(new driver::Factory(), intClass, subClass, protocol)
 
 namespace freeril
 {
@@ -37,8 +37,10 @@ namespace freeril
 		typedef uint16_t ProductID;
 		typedef uint8_t DeviceClass;
 		typedef uint8_t DeviceSubclass;
+		typedef uint8_t DeviceProtocol;
 		typedef uint8_t InterfaceClass;
 		typedef uint8_t InterfaceSubclass;
+		typedef uint8_t InterfaceProtocol;
 		typedef std::string DeviceReference;
 
 		class Driver
@@ -87,11 +89,13 @@ namespace freeril
 		static Registered registerDeviceClass(
 				const Driver::Factory* factory,
 				const DeviceClass deviceClass,
-				const DeviceSubclass deviceSubclass);
+				const DeviceSubclass deviceSubclass,
+				const DeviceProtocol deviceProtocol);
 		static Registered registerInterfaceClass(
 				const Driver::Factory* factory,
 				const InterfaceClass interfaceClass,
-				const InterfaceSubclass interfaceSubclass);
+				const InterfaceSubclass interfaceSubclass,
+				const InterfaceProtocol interfaceProtocol);
 
 	protected:
 		USB();
