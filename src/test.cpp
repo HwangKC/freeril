@@ -13,7 +13,7 @@ int main()
 {
 	using namespace freeril;
 
-	USB& usb __attribute__((unused)) = USB::initInstance();
+	USB& usb __attribute__((unused)) = USB::instance();
 
 	char foo[255];
 	std::cin.getline(foo, 255);

@@ -2,21 +2,21 @@
  * log.cpp
  *
  *  Created on: 03.03.2012
- *      Author: Swen Kuehnlein
+ *      Author: Swen Kühnlein
  */
 
 #include "log.h"
 
 #ifdef __GNUG__
 #include <cxxabi.h>
-#endif
+#endif // __GNUG__
 
 #include <boost/assign/list_of.hpp>
 
 #include <typeinfo>
 #include <map>
 
-// TODO: use logcat on android
+// TODO(swen): use logcat on android
 
 #include <iostream>
 
@@ -44,11 +44,11 @@ Loggable::~Loggable()
 std::string Loggable::logName() const
 {
 #ifdef __GNUG__
-	int status{-4};
-	const char *const name{typeid(*this).name()};
-	char* res{abi::__cxa_demangle(name, NULL, NULL, &status)};
-	const char *const demangled_name{(status == 0) ? res : name};
-	std::string retval{demangled_name};
+	int status = -4;
+	const char *const name = typeid(*this).name();
+	char* res = abi::__cxa_demangle(name, NULL, NULL, &status);
+	const char *const demangled_name = (status == 0) ? res : name;
+	std::string retval(demangled_name);
 	free(res);
 	return retval;
 #else
@@ -56,14 +56,21 @@ std::string Loggable::logName() const
 #endif
 }
 
-void logmsg(const std::string& from, const log::Priority priority, const std::string& msg)
+void logmsg(
+		const std::string& from,
+		const log::Priority priority,
+		const std::string& msg)
 {
-	std::cout << prioString[priority] << "/" << from << ": " << msg << std::endl;
+	std::cout << prioString[priority]
+	          << "/" << from << ": " << msg << std::endl;
 }
 
-void logmsg(const Loggable* from, const log::Priority priority, const std::string& msg)
+void logmsg(
+		const Loggable* from,
+		const log::Priority priority,
+		const std::string& msg)
 {
 	logmsg(from->logName(), priority, msg);
 }
 
-}
+} // namespace freeril

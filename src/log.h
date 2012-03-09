@@ -2,11 +2,11 @@
  * log.h
  *
  *  Created on: 03.03.2012
- *      Author: Swen Kuehnlein
+ *      Author: Swen Kühnlein
  */
 
-#ifndef LOG_H_
-#define LOG_H_
+#ifndef FREERIL_LOG_H_
+#define FREERIL_LOG_H_
 
 #include <string>
 
@@ -25,29 +25,35 @@
 namespace freeril
 {
 
-	class Loggable
-	{
-	public:
-		virtual ~Loggable();
-		virtual std::string logName() const;
-	};
+class Loggable
+{
+public:
+	virtual ~Loggable();
+	virtual std::string logName() const;
+};
 
-	namespace log
-	{
-		enum Priority
-		{
-			DEFAULT = 0,
-			VERBOSE,
-			DEBUG,
-			INFO,
-			WARN,
-			ERROR
-		};
-	}
+namespace log
+{
+enum Priority
+{
+	DEFAULT = 0,
+	VERBOSE,
+	DEBUG,
+	INFO,
+	WARN,
+	ERROR
+};
+} // namespace log
 
-	void logmsg(const Loggable* from, const log::Priority priority, const std::string& msg);
-	void logmsg(const std::string& from, const log::Priority priority, const std::string& msg);
+void logmsg(
+		const Loggable* from,
+		const log::Priority priority,
+		const std::string& msg);
+void logmsg(
+		const std::string& from,
+		const log::Priority priority,
+		const std::string& msg);
 
-}
+} // namespace freeril
 
-#endif /* LOG_H_ */
+#endif /* FREERIL_LOG_H_ */

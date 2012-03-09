@@ -2,7 +2,7 @@
  * CDCACM.cpp
  *
  *  Created on: 01.03.2012
- *      Author: Swen Kuehnlein
+ *      Author: Swen Kühnlein
  */
 
 #include "USB.h"
@@ -13,29 +13,25 @@
 namespace freeril
 {
 
-	class CDCACM : public USB::Driver, public Loggable
+class CDCACM : public USB::Driver, public Loggable
+{
+public:
+	class Factory : public USB::Driver::DefaultFactory<CDCACM>
 	{
+		typedef USB::Driver::DefaultFactory<CDCACM> Super;
 	public:
-		CDCACM(const std::string& deviceName);
-		virtual ~CDCACM();
+		Factory();
+		virtual ~Factory();
 
-		class Factory : public USB::Driver::DefaultFactory<CDCACM>
-		{
-			typedef USB::Driver::DefaultFactory<CDCACM> Super;
-		public:
-			Factory();
-			virtual ~Factory();
+		virtual bool isSupported(const USB::DeviceReference& device) const;
 
-			virtual bool isSupported(const USB::DeviceReference& device) const;
-
-		};
-
-		static std::string name();
 	};
 
-}
+	CDCACM(const std::string& deviceName);
+	virtual ~CDCACM();
 
-using namespace freeril;
+	static std::string name();
+};
 
 CDCACM::Factory::Factory() :
 		Super{}
@@ -67,8 +63,10 @@ std::string CDCACM::name()
 	return "CDCACM";
 }
 
+} // namespace freeril
+
 // turn off Eclipse CDT's warning about unused variable
 #ifdef __CDT_PARSER__
-#define FREERIL_USB_REGISTER_INTERFACECLASS(a,b,c)
-#endif
-FREERIL_USB_REGISTER_INTERFACECLASS(CDCACM, 2, 2, 1);
+#define FREERIL_USB_REGISTER_INTERFACECLASS(a, b, c, d)
+#endif // __CDT_PARSER__
+FREERIL_USB_REGISTER_INTERFACECLASS(freeril::CDCACM, 2, 2, 1);
